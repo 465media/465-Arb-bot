@@ -19,6 +19,15 @@ npm run report         # summarise logs/windows-*.jsonl
 ```
 Run it under systemd with `deploy/sol-arb-scanner.service` (user unit). You can also use pm2/tmux.
 
+## Deploy on xCloud (Node site)
+- Build command: `npm ci`
+- Start command: `npm start`, serving mode SSR, port `3000` (the scanner serves its status page on `$PORT`)
+- Environment: `RPC_URL`, `WS_URL` (Helius), optional `STATUS_TOKEN` (requires `?token=` on the status page), optional `LOG_DIR`
+- `logs/` is gitignored, so redeploys don't wipe it.
+
+## Status page
+`/` shows a light dashboard (theme toggle included) and refreshes every 30s. `/status.json` returns the same data as JSON.
+
 ## Config (`config.json`)
 - `tokens` / `quotes`: watch list, keyed by **mint address**. Restart after editing.
 - `minLiquidityUsd`, `maxPoolsPerPair`: control which pools get watched.

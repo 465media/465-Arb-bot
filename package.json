@@ -1,6 +1,6 @@
 {
   "name": "sol-arb-scanner",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Read-only Solana DEX arbitrage scanner",
   "main": "index.js",
   "scripts": {
@@ -18,8 +18,10 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
-    "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   },
-  "type": "module"
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
 }

@@ -7,6 +7,7 @@ import path from "node:path";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { discover, refreshAdjustments, getMany, type Config } from "./discovery.js";
 import { Pool, DlmmPool } from "./pools.js";
+import { startWeb, type LiveState } from "./web.js";
 
 const cfg: Config = JSON.parse(fs.readFileSync(new URL("../config.json", import.meta.url), "utf8"));
 const RPC = process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
@@ -75,10 +76,17 @@ function evaluate(c: Cycle) {
   return { edgeBps: (rate - 1) * 1e4, size, gross, net: gross - cfg.fixedCostSol * LAMPORTS };
 }
 
+const live: LiveState = { startedAt: Date.now(), phase: "starting", rpcHost: new URL(RPC).host, pools: 0, cycles: 0,
+  subscriptions: 0, slot: 0, updatesLastMin: 0, openWindows: 0, closedWindows: 0, watch: [] };
+
 async function main() {
-  log(`discovering pools (rpc=${new URL(RPC).host})...`);
+  startWeb(live, LOG_DIR, log);
+  live.phase = "discovering pools";
+  log(`discovering pools (rpc=${live.rpcHost})...`);
   const pools = await discover(conn, cfg, log);
   const cycles = buildCycles(pools);
+  Object.assign(live, { pools: pools.length, cycles: cycles.length,
+    watch: pools.map((p) => ({ label: p.label(), pair: `${sym(p.mintA)}/${sym(p.mintB)}`, fee: p.fee, id: p.id })) });
   log(`${pools.length} pools, ${cycles.length} cycles`);
 
   const byKey = new Map<string, Pool[]>();
@@ -92,7 +100,7 @@ async function main() {
   keys.forEach((k, i) => snap.data[i] && byKey.get(k)!.forEach((p) => p.onAccount(k, snap.data[i]!, 0)));
 
   const open = new Map<string, Window>();
-  let updates = 0, closed = 0, lastSlot = await conn.getSlot("processed");
+  let updates = 0, updatesMin = 0, closed = 0, lastSlot = await conn.getSlot("processed");
   const day = () => new Date().toISOString().slice(0, 10);
 
   const closeWindow = (c: Cycle, w: Window) => {
@@ -130,7 +138,7 @@ async function main() {
   const subscribe = (k: string) => {
     if (subscribed.has(k)) return; subscribed.add(k);
     conn.onAccountChange(new PublicKey(k), (acc, ctx) => {
-      updates++; lastSlot = Math.max(lastSlot, ctx.slot);
+      updates++; updatesMin++; lastSlot = Math.max(lastSlot, ctx.slot);
       for (const p of byKey.get(k)!) { p.onAccount(k, acc.data as Buffer, ctx.slot); onUpdate(p); if (p instanceof DlmmPool) ensureDynamic(p); }
     }, { commitment: "processed", encoding: "base64" } as any);
   };
@@ -149,6 +157,8 @@ async function main() {
   binKeys.forEach(([k, p], i) => { (byKey.get(k) ?? byKey.set(k, []).get(k)!).push(p); subscribe(k); if (binSnap.data[i]) p.onAccount(k, binSnap.data[i]!, lastSlot); });
   for (const p of pools) log(`  ${p.label().padEnd(22)} ${sym(p.mintA)}/${sym(p.mintB)}  fee=${(p.fee * 100).toFixed(3)}%  ready=${p.ready()}  ${p.id}`);
   for (const c of cycles) check(c);
+  live.phase = "scanning"; live.subscriptions = subscribed.size;
+  live.watch = pools.map((p) => ({ label: p.label(), pair: `${sym(p.mintA)}/${sym(p.mintB)}`, fee: p.fee, id: p.id }));
   log(`subscribed to ${subscribed.size} accounts; logging to ${LOG_DIR}`);
 
   setInterval(() => refreshAdjustments(conn, pools).catch((e) => log("refresh error", e.message)), 60_000);
@@ -158,6 +168,11 @@ async function main() {
       (best ? `  best-open=${(best[1].peakNet / LAMPORTS).toFixed(5)} SOL ${cycles.find((c) => c.id === best[0])?.name}` : ""));
     updates = 0;
   }, cfg.statusEverySec * 1000);
+  setInterval(() => {
+    Object.assign(live, { slot: lastSlot, openWindows: open.size, closedWindows: closed, updatesLastMin: updatesMin });
+    updatesMin = 0;
+  }, 60_000);
+  setInterval(() => Object.assign(live, { slot: lastSlot, openWindows: open.size, closedWindows: closed }), 5_000);
 
   const shutdown = () => { for (const c of cycles) { const w = open.get(c.id); if (w) closeWindow(c, w); } process.exit(0); };
   process.on("SIGINT", shutdown); process.on("SIGTERM", shutdown);
