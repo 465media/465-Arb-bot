@@ -1,0 +1,14 @@
+[Unit]
+Description=Solana arb scanner (read-only)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/sol-arb-scanner
+ExecStart=/usr/bin/env npm start
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

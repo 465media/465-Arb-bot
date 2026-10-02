@@ -1,0 +1,21 @@
+{
+  "_comment": "Watch list. Tokens are matched by mint address, never by ticker. Edit freely; restart to apply.",
+  "quotes": {
+    "SOL": "So11111111111111111111111111111111111111112",
+    "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "USDT": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+  },
+  "tokens": {
+    "ZBCN": "ZBCNpuD7YMXzTHB2fhGkGi78MNsHGLRXUhRewNRm9RU",
+    "JUP":  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+    "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "WIF":  "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"
+  },
+  "minLiquidityUsd": 10000,
+  "maxPoolsPerPair": 6,
+  "maxTradeSol": 10,
+  "fixedCostSol": 0.0001,
+  "minProfitSol": 0,
+  "debounceMs": 60,
+  "statusEverySec": 60
+}
