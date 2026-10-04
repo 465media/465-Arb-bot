@@ -13,7 +13,7 @@
   },
   "minLiquidityUsd": 10000,
   "maxPoolsPerPair": 6,
-  "maxTradeSol": 10,
+  "maxTradeSol": 50,
   "fixedCostSol": 0.0001,
   "minProfitSol": 0,
   "debounceMs": 60,
