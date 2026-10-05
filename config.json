@@ -17,5 +17,14 @@
   "fixedCostSol": 0.0001,
   "minProfitSol": 0,
   "debounceMs": 60,
-  "statusEverySec": 60
+  "statusEverySec": 60,
+  "paper": {
+    "enabled": true,
+    "minPredictedNetSol": 0.0003,
+    "costSol": 0.0003,
+    "cooldownMs": 5000,
+    "quoteUrl": "https://lite-api.jup.ag/swap/v1/quote",
+    "bucketSize": 6,
+    "refillPerSec": 1
+  }
 }

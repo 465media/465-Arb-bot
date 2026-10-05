@@ -8,6 +8,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { discover, refreshAdjustments, getMany, type Config } from "./discovery.js";
 import { Pool, DlmmPool } from "./pools.js";
 import { startWeb, type LiveState } from "./web.js";
+import { PaperTrader, type PaperConfig } from "./paper.js";
 
 const cfg: Config = JSON.parse(fs.readFileSync(new URL("../config.json", import.meta.url), "utf8"));
 const RPC = process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
@@ -79,8 +80,12 @@ function evaluate(c: Cycle) {
 const live: LiveState = { startedAt: Date.now(), phase: "starting", rpcHost: new URL(RPC).host, pools: 0, cycles: 0,
   subscriptions: 0, slot: 0, updatesLastMin: 0, openWindows: 0, closedWindows: 0, watch: [] };
 
+const paperCfg: PaperConfig = { enabled: true, minPredictedNetSol: 0.0003, costSol: 0.0003, cooldownMs: 5000,
+  quoteUrl: "https://lite-api.jup.ag/swap/v1/quote", bucketSize: 6, refillPerSec: 1, ...((cfg as any).paper ?? {}) };
+const paper = new PaperTrader(paperCfg, LOG_DIR, log);
+
 async function main() {
-  startWeb(live, LOG_DIR, log);
+  startWeb(live, LOG_DIR, log, paper);
   live.phase = "discovering pools";
   log(`discovering pools (rpc=${live.rpcHost})...`);
   const pools = await discover(conn, cfg, log);
@@ -122,7 +127,10 @@ async function main() {
     const r = evaluate(c);
     const w = open.get(c.id);
     if (r && r.net > cfg.minProfitSol * LAMPORTS) {
-      if (!w) open.set(c.id, { opened: Date.now(), openSlot: lastSlot, peakNet: r.net, peakSize: r.size, peakEdgeBps: r.edgeBps, evals: 1, lastSlot });
+      if (!w) {
+        open.set(c.id, { opened: Date.now(), openSlot: lastSlot, peakNet: r.net, peakSize: r.size, peakEdgeBps: r.edgeBps, evals: 1, lastSlot });
+        paper.consider(c.name, c.legs.map((l) => ({ kind: l.pool.kind, poolId: l.pool.id, from: l.from, to: l.to })), r.size, r.net);
+      }
       else { w.evals++; if (r.net > w.peakNet) { w.peakNet = r.net; w.peakSize = r.size; } w.peakEdgeBps = Math.max(w.peakEdgeBps, r.edgeBps); }
     } else if (w) closeWindow(c, w);
   };

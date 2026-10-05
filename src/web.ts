@@ -4,6 +4,7 @@
 // Set STATUS_TOKEN to require ?token=... on every request.
 import http from "node:http";
 import { loadRows, logFiles, summarize } from "./summary.js";
+import { loadPaper, summarizePaper, type PaperTrader } from "./paper.js";
 
 export interface LiveState {
   startedAt: number; phase: string; rpcHost: string; pools: number; cycles: number; subscriptions: number;
@@ -13,12 +14,13 @@ export interface LiveState {
 
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
-export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]) => void) {
+export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]) => void, paper?: PaperTrader) {
   const port = Number(process.env.PORT ?? 3000);
   const token = process.env.STATUS_TOKEN;
   const data = () => {
     const files = logFiles(logDir);
-    return { live: state, today: summarize(loadRows(files.slice(-1))), last7d: summarize(loadRows(files.slice(-7))) };
+    return { live: state, today: summarize(loadRows(files.slice(-1))), last7d: summarize(loadRows(files.slice(-7))),
+      paper: { ...summarizePaper(loadPaper(logDir, 7)), session: paper?.stats ?? null, settings: paper?.cfg ?? null } };
   };
   http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
@@ -29,13 +31,17 @@ export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]
   }).listen(port, () => log(`status page on :${port}`));
 }
 
-function page({ live, today, last7d }: ReturnType<typeof Object> & any) {
+function page({ live, today, last7d, paper }: ReturnType<typeof Object> & any) {
   const up = Math.round((Date.now() - live.startedAt) / 60000);
   const stat = (k: string, v: unknown) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`;
   const routes = last7d.routes.slice(0, 20).map((r: any) =>
     `<tr><td>${esc(r.route)}</td><td>${r.windows}</td><td>${r.catchable}</td><td>${r.catchableSol.toFixed(4)}</td><td>${r.maxSol.toFixed(4)}</td><td>${r.approx ? "~" : ""}</td></tr>`).join("");
   const top = last7d.top.slice(0, 15).map((r: any) =>
     `<tr><td>${esc(r.openedAt.slice(0, 19).replace("T", " "))}</td><td>${r.peakNetSol}</td><td>${r.slots}</td><td>${r.peakEdgeBps}</td><td>${r.peakSizeSol}</td><td class="mono">${esc(r.cycle)}</td></tr>`).join("");
+  const pr = paper.routes.slice(0, 15).map((r: any) =>
+    `<tr><td>${esc(r.route)}</td><td>${r.attempts}</td><td>${r.wins}</td><td>${r.paperSol.toFixed(4)}</td><td>${r.avgPredicted.toFixed(5)}</td><td>${r.avgQuoted.toFixed(5)}</td></tr>`).join("");
+  const pt = paper.recent.map((r: any) =>
+    `<tr><td>${esc(r.at.slice(5, 19).replace("T", " "))}</td><td class="${r.won ? "win" : "loss"}">${r.error ? "error" : r.won ? "win" : "miss"}</td><td>${r.sizeSol}</td><td>${r.predictedNetSol}</td><td>${r.quotedNetSol ?? esc(r.error ?? "")}</td><td>${r.latencyMs}</td><td class="mono">${esc(r.route)}</td></tr>`).join("");
   const pools = live.watch.map((p: any) =>
     `<tr><td>${esc(p.label)}</td><td>${esc(p.pair)}</td><td>${(p.fee * 100).toFixed(3)}%</td><td class="mono">${esc(p.id)}</td></tr>`).join("");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -50,12 +56,17 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px}.m
 .tbl{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}table{border-collapse:collapse;width:100%}
 th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mut);font-weight:500;font-size:12px}
 .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}</style></head><body><main>
+.win{color:var(--ok);font-weight:600}.loss{color:var(--mut)}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}</style></head><body><main>
 <header><div><h1>Arb Scanner</h1><div class="mut"><span class="dot"></span>${esc(live.phase)} · up ${up} min · read-only, no wallet</div></div>
 <button onclick="t()">Toggle theme</button></header>
 <div class="grid">${stat("Slot", live.slot)}${stat("Updates / min", live.updatesLastMin)}${stat("Pools", live.pools)}${stat("Routes", live.cycles)}
 ${stat("Open windows", live.openWindows)}${stat("Windows today", today.windows)}${stat("≥2 slots today", today.catchable)}${stat("Catchable SOL today", today.catchableSol)}
 ${stat("Catchable SOL 7d", last7d.catchableSol)}${stat("RPC", live.rpcHost)}</div>
+<h2>Paper trades, last 7 days</h2>
+<p class="mut" style="margin:0 0 8px">When a gap opens, the bot re-prices the exact trade with live Jupiter quotes, like a real bot would right before sending. "Win" = still profitable after real quotes, delay and ${paper.settings?.costSol ?? "?"} SOL cost. Nothing is ever sent.</p>
+<div class="grid" style="margin-top:0">${stat("Paper profit (SOL)", paper.paperSol)}${stat("Wins / attempts", `${paper.wins} / ${paper.attempts - paper.errors}`)}${stat("Win rate", paper.winRate + "%")}${stat("Predicted (SOL)", paper.predictedSol)}${stat("Median latency", paper.medianLatencyMs + " ms")}${stat("Skipped (rate limit)", paper.session?.skippedRate ?? 0)}</div>
+<div class="tbl" style="margin-top:10px"><table><tr><th>Route</th><th>Attempts</th><th>Wins</th><th>Paper SOL</th><th>Avg predicted</th><th>Avg quoted</th></tr>${pr || '<tr><td colspan="6" class="mut">No paper trades yet</td></tr>'}</table></div>
+<div class="tbl" style="margin-top:10px"><table><tr><th>Time (UTC)</th><th>Result</th><th>Size SOL</th><th>Predicted</th><th>Quoted net</th><th>ms</th><th>Route</th></tr>${pt || '<tr><td colspan="7" class="mut">Nothing yet</td></tr>'}</table></div>
 <h2>Routes, last 7 days</h2><div class="tbl"><table><tr><th>Route</th><th>Windows</th><th>≥2 slots</th><th>SOL (≥2)</th><th>Max SOL</th><th>Approx</th></tr>${routes || '<tr><td colspan="6" class="mut">Nothing yet</td></tr>'}</table></div>
 <h2>Best windows that lasted ≥2 slots, last 7 days</h2><div class="tbl"><table><tr><th>Opened (UTC)</th><th>Net SOL</th><th>Slots</th><th>Edge bps</th><th>Size SOL</th><th>Route</th></tr>${top || '<tr><td colspan="6" class="mut">Nothing yet</td></tr>'}</table></div>
 <h2>Watched pools</h2><div class="tbl"><table><tr><th>Pool</th><th>Pair</th><th>Fee</th><th>Address</th></tr>${pools}</table></div>
