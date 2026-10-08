@@ -26,5 +26,17 @@
     "quoteUrl": "https://lite-api.jup.ag/swap/v1/quote",
     "bucketSize": 6,
     "refillPerSec": 1
+  },
+  "live": {
+    "_comment": "Mode comes from env LIVE_MODE (off | simulate | live). Wallet key from env WALLET_SECRET. Never put keys in this file.",
+    "routes": ["SOL→USDC→USDT→SOL", "SOL→USDT→USDC→SOL", "SOL→USDC→JUP→SOL", "SOL→USDT→SOL"],
+    "maxSizeSol": 0.5,
+    "minProfitSol": 0.00005,
+    "minPredictedNetSol": 0.0003,
+    "tipMinSol": 0.00002,
+    "tipShare": 0.3,
+    "cooldownMs": 3000,
+    "maxLossSol": 0.05,
+    "minBalanceSol": 0.05
   }
 }

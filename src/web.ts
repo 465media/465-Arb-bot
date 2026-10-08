@@ -5,6 +5,7 @@
 import http from "node:http";
 import { loadRows, logFiles, summarize } from "./summary.js";
 import { loadPaper, summarizePaper, type PaperTrader } from "./paper.js";
+import { loadLive, type LiveTrader } from "./live.js";
 
 export interface LiveState {
   startedAt: number; phase: string; rpcHost: string; pools: number; cycles: number; subscriptions: number;
@@ -14,13 +15,14 @@ export interface LiveState {
 
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
-export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]) => void, paper?: PaperTrader) {
+export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]) => void, paper?: PaperTrader, liveT?: LiveTrader) {
   const port = Number(process.env.PORT ?? 3000);
   const token = process.env.STATUS_TOKEN;
   const data = () => {
     const files = logFiles(logDir);
     return { live: state, today: summarize(loadRows(files.slice(-1))), last7d: summarize(loadRows(files.slice(-7))),
-      paper: { ...summarizePaper(loadPaper(logDir, 7)), session: paper?.stats ?? null, settings: paper?.cfg ?? null } };
+      paper: { ...summarizePaper(loadPaper(logDir, 7)), session: paper?.stats ?? null, settings: paper?.cfg ?? null },
+      trading: liveT ? { ...liveT.state, routes: liveT.cfg.routes, maxSizeSol: liveT.cfg.maxSizeSol, maxLossSol: liveT.cfg.maxLossSol, recent: loadLive(logDir, 7).slice(-20).reverse() } : null };
   };
   http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
@@ -31,7 +33,7 @@ export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]
   }).listen(port, () => log(`status page on :${port}`));
 }
 
-function page({ live, today, last7d, paper }: ReturnType<typeof Object> & any) {
+function page({ live, today, last7d, paper, trading }: ReturnType<typeof Object> & any) {
   const up = Math.round((Date.now() - live.startedAt) / 60000);
   const stat = (k: string, v: unknown) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`;
   const routes = last7d.routes.slice(0, 20).map((r: any) =>
@@ -42,6 +44,13 @@ function page({ live, today, last7d, paper }: ReturnType<typeof Object> & any) {
     `<tr><td>${esc(r.route)}</td><td>${r.attempts}</td><td>${r.wins}</td><td>${r.paperSol.toFixed(4)}</td><td>${r.avgPredicted.toFixed(5)}</td><td>${r.avgQuoted.toFixed(5)}</td></tr>`).join("");
   const pt = paper.recent.map((r: any) =>
     `<tr><td>${esc(r.at.slice(5, 19).replace("T", " "))}</td><td class="${r.won ? "win" : "loss"}">${r.error ? "error" : r.won ? "win" : "miss"}</td><td>${r.sizeSol}</td><td>${r.predictedNetSol}</td><td>${r.quotedNetSol ?? esc(r.error ?? "")}</td><td>${r.latencyMs}</td><td class="mono">${esc(r.route)}</td></tr>`).join("");
+  const T = trading;
+  const lt = (T?.recent ?? []).map((r: any) => `<tr><td>${esc(r.at.slice(5, 19).replace("T", " "))}</td><td class="${/landed$|sim-ok/.test(r.outcome) ? "win" : "loss"}">${esc(r.outcome)}</td><td>${r.sizeSol}</td><td>${r.quotedNetSol ?? ""}</td><td>${r.realizedSol ?? r.simDeltaSol ?? ""}</td><td>${r.ms}</td><td class="mono">${esc(r.route)}${r.detail ? `<br><span class="mut">${esc(r.detail)}</span>` : ""}</td></tr>`).join("");
+  const liveHtml = !T ? "" : `<h2>Live trading</h2>
+<div class="grid" style="margin-top:0">${stat("Mode", T.halted ? "HALTED" : T.mode)}${stat("Wallet", T.wallet ? T.wallet.slice(0, 4) + "…" + T.wallet.slice(-4) : "none")}${stat("Balance SOL", (+T.balanceSol).toFixed(4))}${stat("Change SOL", (T.balanceSol - T.startBalanceSol).toFixed(5))}
+${stat("Attempts", T.attempts)}${stat("No-go (gap gone)", T.noGo)}${stat(T.mode === "simulate" ? "Sim OK" : "Sent", T.mode === "simulate" ? T.simulatedOk : T.sent)}${stat("Landed", T.landed)}${stat("Realized SOL", (+T.realizedSol).toFixed(5))}</div>
+<p class="mut" style="margin:6px 0">${esc(T.reason || "")} Routes: ${esc(T.routes.join(", "))} · max size ${T.maxSizeSol} SOL · stops if down ${T.maxLossSol} SOL</p>
+<div class="tbl"><table><tr><th>Time (UTC)</th><th>Outcome</th><th>Size</th><th>Quoted net</th><th>Real / sim Δ</th><th>ms</th><th>Route</th></tr>${lt || '<tr><td colspan="7" class="mut">No live attempts yet</td></tr>'}</table></div>`;
   const pools = live.watch.map((p: any) =>
     `<tr><td>${esc(p.label)}</td><td>${esc(p.pair)}</td><td>${(p.fee * 100).toFixed(3)}%</td><td class="mono">${esc(p.id)}</td></tr>`).join("");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -62,6 +71,7 @@ th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white
 <div class="grid">${stat("Slot", live.slot)}${stat("Updates / min", live.updatesLastMin)}${stat("Pools", live.pools)}${stat("Routes", live.cycles)}
 ${stat("Open windows", live.openWindows)}${stat("Windows today", today.windows)}${stat("≥2 slots today", today.catchable)}${stat("Catchable SOL today", today.catchableSol)}
 ${stat("Catchable SOL 7d", last7d.catchableSol)}${stat("RPC", live.rpcHost)}</div>
+${liveHtml}
 <h2>Paper trades, last 7 days</h2>
 <p class="mut" style="margin:0 0 8px">When a gap opens, the bot re-prices the exact trade with live Jupiter quotes, like a real bot would right before sending. "Win" = still profitable after real quotes, delay and ${paper.settings?.costSol ?? "?"} SOL cost. Nothing is ever sent.</p>
 <div class="grid" style="margin-top:0">${stat("Paper profit (SOL)", paper.paperSol)}${stat("Wins / attempts", `${paper.wins} / ${paper.attempts - paper.errors}`)}${stat("Win rate", paper.winRate + "%")}${stat("Predicted (SOL)", paper.predictedSol)}${stat("Median latency", paper.medianLatencyMs + " ms")}${stat("Skipped (rate limit)", paper.session?.skippedRate ?? 0)}</div>
