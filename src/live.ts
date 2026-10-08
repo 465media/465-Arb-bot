@@ -53,7 +53,7 @@ export class LiveTrader {
   blockhash: { blockhash: string; lastValidBlockHeight: number } | null = null;
   busy = false;
   lastByRoute = new Map<string, number>();
-  state = { mode: "off", reason: "", wallet: "", startBalanceSol: 0, balanceSol: 0, halted: false,
+  state = { mode: "off", reason: "", wallet: "", startBalanceSol: 0, balanceSol: 0, halted: false, waiting: false,
     attempts: 0, noGo: 0, simulatedOk: 0, sent: 0, landed: 0, notLanded: 0, failed: 0, realizedSol: 0 };
 
   constructor(public cfg: LiveConfig, public conn: Connection, public logDir: string, public log: (...a: unknown[]) => void) {
@@ -71,6 +71,7 @@ export class LiveTrader {
     this.state.wallet = this.pubkey.toBase58();
     const bal = await this.conn.getBalance(this.pubkey, "confirmed");
     this.state.startBalanceSol = this.state.balanceSol = bal / LAMPORTS;
+    await this.checkBalance();
     await this.refreshBlockhash();
     setInterval(() => this.refreshBlockhash().catch(() => {}), 10_000);
     setInterval(() => this.checkBalance().catch(() => {}), 30_000);
@@ -89,6 +90,15 @@ export class LiveTrader {
   private async checkBalance() {
     if (!this.pubkey) return;
     this.state.balanceSol = (await this.conn.getBalance(this.pubkey, "confirmed")) / LAMPORTS;
+    // not funded yet (or funded after start): wait instead of tripping the breaker, and
+    // take the first funded balance as the starting point
+    if (this.state.attempts === 0 && this.state.startBalanceSol < this.cfg.minBalanceSol) {
+      if (this.state.balanceSol >= this.cfg.minBalanceSol) {
+        this.state.startBalanceSol = this.state.balanceSol; this.state.waiting = false; this.state.reason = "";
+        this.log(`LIVE funded: starting balance ${this.state.balanceSol} SOL`);
+      } else { this.state.waiting = true; this.state.reason = "waiting for the wallet to be funded"; }
+      return;
+    }
     const lost = this.state.startBalanceSol - this.state.balanceSol;
     if (!this.state.halted && this.cfg.mode === "live" && (lost > this.cfg.maxLossSol || this.state.balanceSol < this.cfg.minBalanceSol)) {
       this.state.halted = true;
@@ -98,7 +108,7 @@ export class LiveTrader {
   }
 
   consider(route: string, legs: PaperLeg[], sizeLamports: number, predictedNetLamports: number) {
-    if (this.state.mode === "off" || this.state.halted || this.busy) return;
+    if (this.state.mode === "off" || this.state.halted || this.state.waiting || this.busy) return;
     const key = route.split("  [")[0];
     if (!this.cfg.routes.includes(key)) return;
     if (predictedNetLamports < this.cfg.minPredictedNetSol * LAMPORTS) return;
