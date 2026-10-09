@@ -22,7 +22,7 @@ export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]
     const files = logFiles(logDir);
     return { live: state, today: summarize(loadRows(files.slice(-1))), last7d: summarize(loadRows(files.slice(-7))),
       paper: { ...summarizePaper(loadPaper(logDir, 7)), session: paper?.stats ?? null, settings: paper?.cfg ?? null },
-      trading: liveT ? { ...liveT.state, routes: liveT.cfg.routes, maxSizeSol: liveT.cfg.maxSizeSol, maxLossSol: liveT.cfg.maxLossSol, recent: loadLive(logDir, 7).slice(-20).reverse() } : null };
+      trading: liveT ? { ...liveT.state, routes: liveT.cfg.routes, maxSizeSol: liveT.cfg.maxSizeSol, useFlashLoan: liveT.cfg.useFlashLoan, maxLossSol: liveT.cfg.maxLossSol, recent: loadLive(logDir, 7).slice(-20).reverse() } : null };
   };
   http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
@@ -45,11 +45,11 @@ function page({ live, today, last7d, paper, trading }: ReturnType<typeof Object>
   const pt = paper.recent.map((r: any) =>
     `<tr><td>${esc(r.at.slice(5, 19).replace("T", " "))}</td><td class="${r.won ? "win" : "loss"}">${r.error ? "error" : r.won ? "win" : "miss"}</td><td>${r.sizeSol}</td><td>${r.predictedNetSol}</td><td>${r.quotedNetSol ?? esc(r.error ?? "")}</td><td>${r.latencyMs}</td><td class="mono">${esc(r.route)}</td></tr>`).join("");
   const T = trading;
-  const lt = (T?.recent ?? []).map((r: any) => `<tr><td>${esc(r.at.slice(5, 19).replace("T", " "))}</td><td class="${/landed$|sim-ok/.test(r.outcome) ? "win" : "loss"}">${esc(r.outcome)}</td><td>${r.sizeSol}</td><td>${r.quotedNetSol ?? ""}</td><td>${r.realizedSol ?? r.simDeltaSol ?? ""}</td><td>${r.ms}</td><td class="mono">${esc(r.route)}${r.detail ? `<br><span class="mut">${esc(r.detail)}</span>` : ""}</td></tr>`).join("");
+  const lt = (T?.recent ?? []).map((r: any) => `<tr><td>${esc(r.at.slice(5, 19).replace("T", " "))}</td><td class="${/landed$|sim-ok/.test(r.outcome) ? "win" : "loss"}">${esc(r.outcome)}</td><td>${r.sizeSol}${r.via ? ` <span class="mut">${esc(r.via)}</span>` : ""}</td><td>${r.quotedNetSol ?? ""}</td><td>${r.realizedSol ?? r.simDeltaSol ?? ""}</td><td>${r.ms}</td><td class="mono">${esc(r.route)}${r.detail ? `<br><span class="mut">${esc(r.detail)}</span>` : ""}</td></tr>`).join("");
   const liveHtml = !T ? "" : `<h2>Live trading</h2>
 <div class="grid" style="margin-top:0">${stat("Mode", T.halted ? "HALTED" : T.waiting ? "waiting for funds" : T.mode)}${stat("Wallet", T.wallet ? T.wallet.slice(0, 4) + "…" + T.wallet.slice(-4) : "none")}${stat("Balance SOL", (+T.balanceSol).toFixed(4))}${stat("Change SOL", (T.balanceSol - T.startBalanceSol).toFixed(5))}
-${stat("Attempts", T.attempts)}${stat("No-go (gap gone)", T.noGo)}${stat(T.mode === "simulate" ? "Sim OK" : "Sent", T.mode === "simulate" ? T.simulatedOk : T.sent)}${stat("Landed", T.landed)}${stat("Realized SOL", (+T.realizedSol).toFixed(5))}</div>
-<p class="mut" style="margin:6px 0">${esc(T.reason || "")} Routes: ${esc(T.routes.join(", "))} · max size ${T.maxSizeSol} SOL · stops if down ${T.maxLossSol} SOL</p>
+${stat("Attempts", T.attempts)}${stat("No-go (gap gone)", T.noGo)}${stat(T.mode === "simulate" ? "Sim OK" : "Sent", T.mode === "simulate" ? T.simulatedOk : T.sent)}${stat("Lost auction", T.lostAuction ?? 0)}${stat("Gap closed", T.gapClosed ?? 0)}${stat("Landed", T.landed)}${stat("Realized SOL", (+T.realizedSol).toFixed(5))}</div>
+<p class="mut" style="margin:6px 0">${esc(T.reason || "")} Routes: ${esc(T.routes.join(", "))} · max size ${T.maxSizeSol} SOL${T.useFlashLoan ? " (flash loan)" : ""} · stops if down ${T.maxLossSol} SOL</p>
 <div class="tbl"><table><tr><th>Time (UTC)</th><th>Outcome</th><th>Size</th><th>Quoted net</th><th>Real / sim Δ</th><th>ms</th><th>Route</th></tr>${lt || '<tr><td colspan="7" class="mut">No live attempts yet</td></tr>'}</table></div>`;
   const pools = live.watch.map((p: any) =>
     `<tr><td>${esc(p.label)}</td><td>${esc(p.pair)}</td><td>${(p.fee * 100).toFixed(3)}%</td><td class="mono">${esc(p.id)}</td></tr>`).join("");
