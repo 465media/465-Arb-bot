@@ -7,9 +7,12 @@
   },
   "tokens": {
     "ZBCN": "ZBCNpuD7YMXzTHB2fhGkGi78MNsHGLRXUhRewNRm9RU",
-    "JUP":  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+    "JUP": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
     "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
-    "WIF":  "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"
+    "WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+    "PENGU": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+    "FARTCOIN": "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump",
+    "ANSEM": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump"
   },
   "minLiquidityUsd": 10000,
   "maxPoolsPerPair": 6,
@@ -29,13 +32,18 @@
   },
   "live": {
     "_comment": "Mode comes from env LIVE_MODE (off | simulate | live). Wallet key from env WALLET_SECRET. Never put keys in this file.",
-    "routes": ["SOL→USDC→USDT→SOL", "SOL→USDT→USDC→SOL", "SOL→USDC→JUP→SOL", "SOL→USDT→SOL"],
+    "routes": [
+      "SOL→USDC→USDT→SOL",
+      "SOL→USDT→USDC→SOL",
+      "SOL→USDC→JUP→SOL",
+      "SOL→USDT→SOL"
+    ],
     "useFlashLoan": true,
     "maxSizeSol": 5,
     "maxOwnSol": 0.5,
-    "minProfitSol": 0.00005,
+    "minProfitSol": 5e-05,
     "minPredictedNetSol": 0.0003,
-    "tipMinSol": 0.00002,
+    "tipMinSol": 2e-05,
     "tipShare": 0.75,
     "cooldownMs": 3000,
     "maxLossSol": 0.05,
