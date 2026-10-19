@@ -6,6 +6,7 @@ import http from "node:http";
 import { loadRows, logFiles, summarize } from "./summary.js";
 import { loadPaper, summarizePaper, type PaperTrader } from "./paper.js";
 import { loadLive, type LiveTrader } from "./live.js";
+import { BASELINE_APR, type FundingScanner } from "./funding.js";
 
 export interface LiveState {
   startedAt: number; phase: string; rpcHost: string; pools: number; cycles: number; subscriptions: number;
@@ -15,7 +16,7 @@ export interface LiveState {
 
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
-export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]) => void, paper?: PaperTrader, liveT?: LiveTrader) {
+export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]) => void, paper?: PaperTrader, liveT?: LiveTrader, funding?: FundingScanner) {
   const port = Number(process.env.PORT ?? 3000);
   const token = process.env.STATUS_TOKEN;
   const data = () => {
@@ -28,12 +29,14 @@ export function startWeb(state: LiveState, logDir: string, log: (...a: unknown[]
     const url = new URL(req.url ?? "/", "http://x");
     if (token && url.searchParams.get("token") !== token) { res.writeHead(401).end("unauthorized"); return; }
     if (url.pathname === "/status.json") { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(data(), null, 2)); return; }
+    if (url.pathname === "/funding.json") { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(funding?.snapshot ?? null, null, 2)); return; }
+    if (url.pathname === "/funding") { res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(fundingPage(funding?.snapshot ?? null, token)); return; }
     if (url.pathname !== "/") { res.writeHead(404).end("not found"); return; }
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(page(data()));
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(page({ ...data(), token }));
   }).listen(port, () => log(`status page on :${port}`));
 }
 
-function page({ live, today, last7d, paper, trading }: ReturnType<typeof Object> & any) {
+function page({ live, today, last7d, paper, trading, token }: ReturnType<typeof Object> & any) {
   const up = Math.round((Date.now() - live.startedAt) / 60000);
   const stat = (k: string, v: unknown) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`;
   const routes = last7d.routes.slice(0, 20).map((r: any) =>
@@ -66,7 +69,7 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px}.m
 th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mut);font-weight:500;font-size:12px}
 .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
 .win{color:var(--ok);font-weight:600}.loss{color:var(--mut)}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}</style></head><body><main>
-<header><div><h1>Arb Scanner</h1><div class="mut"><span class="dot"></span>${esc(live.phase)} · up ${up} min · read-only, no wallet</div></div>
+${nav("arb", token)}<header><div><h1>Arb Scanner</h1><div class="mut"><span class="dot"></span>${esc(live.phase)} · up ${up} min · live trading: ${esc(trading?.halted ? "HALTED" : trading?.mode ?? "off")}</div></div>
 <button onclick="t()">Toggle theme</button></header>
 <div class="grid">${stat("Slot", live.slot)}${stat("Updates / min", live.updatesLastMin)}${stat("Pools", live.pools)}${stat("Routes", live.cycles)}
 ${stat("Open windows", live.openWindows)}${stat("Windows today", today.windows)}${stat("≥2 slots today", today.catchable)}${stat("Catchable SOL today", today.catchableSol)}
@@ -83,4 +86,47 @@ ${liveHtml}
 <p class="mut">"≥2 slots" means the gap stayed open at least ~0.8s; shorter ones are effectively uncatchable. "Approx" means a CLMM/Whirlpool leg is in the route, so large sizes are optimistic.</p>
 </main><script>function t(){var r=document.documentElement,n=r.dataset.theme==="dark"?"light":"dark";r.dataset.theme=n;try{localStorage.setItem("theme",n)}catch(e){}}
 try{var s=localStorage.getItem("theme");if(s)document.documentElement.dataset.theme=s}catch(e){}</script></body></html>`;
+}
+
+const STYLE = `<style>
+:root{--bg:#f7f8fa;--card:#fff;--fg:#1d2330;--mut:#6b7385;--line:#e4e7ee;--acc:#2f6fed;--ok:#1a8f4c}
+:root[data-theme=dark]{--bg:#12151b;--card:#1b2029;--fg:#e6e9ef;--mut:#9aa3b5;--line:#2a313d;--acc:#6f9bff;--ok:#4cc27f}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px 16px}h1{font-size:20px;margin:0}h2{font-size:15px;margin:24px 0 8px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px}.mut{color:var(--mut)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}.k{color:var(--mut);font-size:12px}.v{font-size:18px;font-weight:600}
+.tbl{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mut);font-weight:500;font-size:12px}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+.win{color:var(--ok);font-weight:600}.loss{color:var(--mut)}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}</style>`;
+const THEME_JS = `<script>function t(){var r=document.documentElement,n=r.dataset.theme==="dark"?"light":"dark";r.dataset.theme=n;try{localStorage.setItem("theme",n)}catch(e){}}
+try{var s=localStorage.getItem("theme");if(s)document.documentElement.dataset.theme=s}catch(e){}</script>`;
+
+function nav(active: "arb" | "funding", token?: string) {
+  const q = token ? `?token=${encodeURIComponent(token)}` : "";
+  const tab = (id: string, href: string, label: string) =>
+    `<a href="${href}${q}" style="padding:6px 12px;border-radius:6px;text-decoration:none;color:${active === id ? "#fff" : "var(--fg)"};background:${active === id ? "var(--acc)" : "var(--card)"};border:1px solid var(--line);margin-right:6px">${label}</a>`;
+  return `<nav style="margin-bottom:14px">${tab("arb", "/", "Arb scanner")}${tab("funding", "/funding", "Funding rates")}</nav>`;
+}
+
+function fundingPage(snap: any, token?: string) {
+  const pct = (x: number) => `${x >= 0 ? "" : "−"}${Math.abs(x).toFixed(1)}%`;
+  const cls = (x: number) => (x >= BASELINE_APR + 2 ? "win" : x < 0 ? "neg" : "");
+  const usd = (x: number) => (x >= 1e9 ? `$${(x / 1e9).toFixed(1)}B` : x >= 1e6 ? `$${(x / 1e6).toFixed(0)}M` : `$${(x / 1e3).toFixed(0)}k`);
+  const rows = (snap?.rows ?? []).slice(0, 40).map((r: any) => `<tr>
+<td><b>${esc(r.coin)}</b></td><td class="${cls(r.aprNow)}">${pct(r.aprNow)}</td><td class="${cls(r.apr24h)}">${pct(r.apr24h)}</td><td class="${cls(r.apr7d)}">${pct(r.apr7d)}</td><td class="${cls(r.apr30d)}">${pct(r.apr30d)}</td>
+<td>${Math.round(r.posShare30d * 100)}%</td><td class="${r.worstDayApr < 0 ? "neg" : ""}">${pct(r.worstDayApr)}</td><td><b>${pct(r.netApr30d)}</b></td>
+<td>${usd(r.oiUsd)}</td><td>${r.spot ? `${esc(r.spot.name)} <span class="mut">${usd(r.spot.volUsd)}/day</span>` : '<span class="mut">off-exchange</span>'}</td></tr>`).join("");
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="60"><title>Funding Rates</title>${STYLE.replace("</style>", ".neg{color:#c0392b}</style>")}</head><body><main>
+${nav("funding", token)}<header><div><h1>Funding rates · Hyperliquid</h1><div class="mut">${snap?.at ? `updated ${esc(snap.at.slice(11, 16))} UTC · ${snap.scanned} of ${snap.coins} perps scanned (≥$1M open interest and volume)` : "loading… first scan takes ~2 minutes"}${snap?.error ? ` · <span class="neg">${esc(snap.error)}</span>` : ""} · read-only</div></div>
+<button onclick="t()">Toggle theme</button></header>
+<p class="mut" style="margin:14px 0">The trade: hold the coin <b>and</b> short the same amount of its perp. Price moves cancel; you collect funding when it's positive (longs pay shorts).
+All rates are <b>annualized</b>. Hyperliquid's baseline is <b>${BASELINE_APR.toFixed(1)}%</b> when nothing unusual is happening, so green means paying meaningfully above it.
+"Net 30d" subtracts a rough ${(0.25 * 12).toFixed(0)}%/yr for trading fees. "Spot hedge" shows whether the coin can be bought on Hyperliquid itself; "off-exchange" means holding it elsewhere (e.g. a Solana token in your wallet).</p>
+<div class="tbl"><table><tr><th>Coin</th><th>Now</th><th>24h</th><th>7d</th><th>30d</th><th>Hours positive</th><th>Worst day</th><th>Net 30d</th><th>Open interest</th><th>Spot hedge</th></tr>
+${rows || '<tr><td colspan="10" class="mut">Scanning…</td></tr>'}</table></div>
+<p class="mut">Ranked by net 30-day rate × how consistently it paid, with on-Hyperliquid hedges ranked higher. Not financial advice; this page never places orders.</p>
+</main>${THEME_JS}</body></html>`;
 }

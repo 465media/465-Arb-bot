@@ -10,6 +10,7 @@ import { Pool, DlmmPool } from "./pools.js";
 import { startWeb, type LiveState } from "./web.js";
 import { PaperTrader, type PaperConfig } from "./paper.js";
 import { LiveTrader, liveConfigFrom } from "./live.js";
+import { FundingScanner } from "./funding.js";
 
 const cfg: Config = JSON.parse(fs.readFileSync(new URL("../config.json", import.meta.url), "utf8"));
 const RPC = process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
@@ -85,9 +86,11 @@ const paperCfg: PaperConfig = { enabled: true, minPredictedNetSol: 0.0003, costS
   quoteUrl: "https://lite-api.jup.ag/swap/v1/quote", bucketSize: 6, refillPerSec: 1, ...((cfg as any).paper ?? {}) };
 const paper = new PaperTrader(paperCfg, LOG_DIR, log);
 const liveTrader = new LiveTrader(liveConfigFrom(cfg), conn, LOG_DIR, log);
+const funding = new FundingScanner(LOG_DIR, log);
 
 async function main() {
-  startWeb(live, LOG_DIR, log, paper, liveTrader);
+  startWeb(live, LOG_DIR, log, paper, liveTrader, funding);
+  funding.start();
   await liveTrader.init().catch((e) => log("live init error", e.message));
   live.phase = "discovering pools";
   log(`discovering pools (rpc=${live.rpcHost})...`);
