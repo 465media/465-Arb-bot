@@ -22,7 +22,7 @@
   "debounceMs": 60,
   "statusEverySec": 60,
   "paper": {
-    "enabled": true,
+    "enabled": false,
     "minPredictedNetSol": 0.0003,
     "costSol": 0.0003,
     "cooldownMs": 5000,
